@@ -238,7 +238,7 @@ mod tests {
         let dbg = format!("{:?}", metrics);
         assert_eq!(
             dbg,
-            "Metrics { hits: 1, misses: 2, keys_added: 0, keys_updated: 2, keys_evicted: 1 }"
+            "Metrics { hits: 1, misses: 2, keys_inserted: 0, keys_updated: 2, keys_evicted: 1 }"
                 .to_string()
         );
     }
