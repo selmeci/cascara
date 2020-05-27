@@ -1,0 +1,34 @@
+language: rust
+sudo: required
+dist: bionic
+addons:
+  apt:
+    packages:
+      - libssl-dev
+cache: cargo
+
+jobs:
+  fast_finish: true
+  include:
+    - name: Coverage
+      rust: stable
+      before_script:
+        - cargo install cargo-tarpaulin
+        - rustup component add rustfmt --toolchain stable-x86_64-unknown-linux-gnu
+      script:
+        - cargo build
+      after_success:
+        - cargo tarpaulin -v --ciserver travis-ci --coveralls $TRAVIS_JOB_ID
+    - name: Check simple example
+      rust: stable
+      script:
+        - cd examples/simple
+        - rustup component add rustfmt --toolchain stable-x86_64-unknown-linux-gnu
+        - cargo fmt -- --check
+        - cargo check
+    - name: Tests
+      rust: stable
+      script:
+        - rustup component add rustfmt --toolchain stable-x86_64-unknown-linux-gnu
+        - cargo fmt -- --check
+        - cargo test --verbose
