@@ -4,6 +4,7 @@ use crate::tiny_lfu::{TinyLFU, TinyLFUCache};
 use probabilistic_collections::SipHasherBuilder;
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::marker::PhantomData;
+use std::sync::Mutex;
 use std::time::Duration;
 
 pub trait OnEvict<K, V> {
@@ -38,9 +39,9 @@ pub struct Cache<
 {
     hasher_builder: H,
     store: S,
-    admit: A,
+    admit: Mutex<A>,
     on_evict: Option<E>,
-    metrics: Option<Metrics>,
+    metrics: Mutex<Option<Metrics>>,
     _k: PhantomData<K>,
     _v: PhantomData<V>,
 }
@@ -64,9 +65,9 @@ impl<K: Eq + Hash, V> Cache<K, V> {
         Self {
             _k: PhantomData::default(),
             _v: PhantomData::default(),
-            metrics: None,
+            metrics: Mutex::new(None),
             on_evict: None,
-            admit: TinyLFUCache::new(window_size),
+            admit: Mutex::new(TinyLFUCache::new(window_size)),
             store: Storage::with_capacity(capacity),
             hasher_builder: SipHasherBuilder::from_entropy(),
         }
@@ -97,9 +98,9 @@ where
         Self {
             _k: PhantomData::default(),
             _v: PhantomData::default(),
-            metrics: None,
+            metrics: Mutex::new(None),
             on_evict: Some(on_evict),
-            admit: TinyLFUCache::new(window_size),
+            admit: Mutex::new(TinyLFUCache::new(window_size)),
             store: Storage::with_capacity(capacity),
             hasher_builder: SipHasherBuilder::from_entropy(),
         }
@@ -124,7 +125,8 @@ where
         if let Some(victim) = victim {
             if let Some(removed) = self.store.remove(&victim.key) {
                 let k = self.key_hash(&removed.k);
-                if let Some(metrics) = &mut self.metrics {
+                let mut metrics = self.metrics.lock().unwrap();
+                if let Some(metrics) = &mut *metrics {
                     metrics.insert(MetricType::KeyEvict, &k, 1);
                 }
                 if let Some(on_evict) = &self.on_evict {
@@ -160,7 +162,8 @@ where
     fn can_be_insert(&mut self, k: &u64) -> Result<Option<SampleItem>, Option<SampleItem>> {
         //no need to find victims if already in cache
         if self.store.contains(k) {
-            if let Some(metrics) = &mut self.metrics {
+            let mut metrics = self.metrics.lock().unwrap();
+            if let Some(metrics) = &mut *metrics {
                 metrics.insert(MetricType::KeyUpdate, &k, 1);
             }
             return Ok(None);
@@ -172,9 +175,10 @@ where
         }
 
         //try find victim and check if incoming item estimate is enough
-        let incoming_estimate = self.admit.estimate(&k);
+        let admit = self.admit.lock().unwrap();
+        let incoming_estimate = admit.estimate(&k);
 
-        let victim = self.store.sample(&self.admit);
+        let victim = self.store.sample(&*admit);
         if let Some(victim) = victim {
             if incoming_estimate < victim.estimate {
                 Err(Some(victim))
@@ -198,8 +202,11 @@ where
     /// assert!(cache.metrics().is_some());
     /// ```
     ///
-    pub fn with_metrics(mut self) -> Self {
-        self.metrics = Some(Metrics::new());
+    pub fn with_metrics(self) -> Self {
+        {
+            let mut metrics = self.metrics.lock().unwrap();
+            metrics.replace(Metrics::new());
+        }
         self
     }
 
@@ -310,20 +317,26 @@ where
     /// assert_eq!(cache.get(&1), Some(&2));
     /// ```
     ///
-    pub fn get(&mut self, k: &K) -> Option<&V> {
+    pub fn get(&self, k: &K) -> Option<&V> {
         let k = self.key_hash(k);
-        self.admit.increment(&k);
+        {
+            let mut admit = self.admit.lock().unwrap();
+            admit.increment(&k);
+        }
         let result = if let Some(item) = self.store.get(&k) {
             Some(&item.v)
         } else {
             None
         };
         let found = result.is_some();
-        if let Some(metrics) = &mut self.metrics {
-            if found {
-                metrics.insert(MetricType::Hit, &k, 1);
-            } else {
-                metrics.insert(MetricType::Miss, &k, 1);
+        {
+            let mut metrics = self.metrics.lock().unwrap();
+            if let Some(metrics) = &mut *metrics {
+                if found {
+                    metrics.insert(MetricType::Hit, &k, 1);
+                } else {
+                    metrics.insert(MetricType::Miss, &k, 1);
+                }
             }
         }
         result
@@ -353,18 +366,24 @@ where
     ///
     pub fn get_mut(&mut self, k: &K) -> Option<&mut V> {
         let k = self.key_hash(k);
-        self.admit.increment(&k);
+        {
+            let mut admit = self.admit.lock().unwrap();
+            admit.increment(&k);
+        }
         let result = if let Some(item) = self.store.get_mut(&k) {
             Some(&mut item.v)
         } else {
             None
         };
         let found = result.is_some();
-        if let Some(metrics) = &mut self.metrics {
-            if found {
-                metrics.insert(MetricType::Hit, &k, 1);
-            } else {
-                metrics.insert(MetricType::Miss, &k, 1);
+        {
+            let mut metrics = self.metrics.lock().unwrap();
+            if let Some(metrics) = &mut *metrics {
+                if found {
+                    metrics.insert(MetricType::Hit, &k, 1);
+                } else {
+                    metrics.insert(MetricType::Miss, &k, 1);
+                }
             }
         }
         result
@@ -432,10 +451,16 @@ where
 
         match self.can_be_insert(&key_hash) {
             Ok(victim) => {
-                self.admit.increment(&key_hash);
+                {
+                    let mut admit = self.admit.lock().unwrap();
+                    admit.increment(&key_hash);
+                }
                 self.remove_victim(victim);
-                if let Some(metrics) = &mut self.metrics {
-                    metrics.insert(MetricType::KeyInsert, &key_hash, 1);
+                {
+                    let mut metrics = self.metrics.lock().unwrap();
+                    if let Some(metrics) = &mut *metrics {
+                        metrics.insert(MetricType::KeyInsert, &key_hash, 1);
+                    }
                 }
                 Ok(self.insert_item_with_ttl(key_hash, item, expiration))
             }
@@ -493,9 +518,15 @@ where
     ///
     pub fn clear(&mut self) {
         self.store.clear();
-        self.admit.clear();
-        if let Some(metrics) = &mut self.metrics {
-            metrics.clear();
+        {
+            let mut admit = self.admit.lock().unwrap();
+            admit.clear();
+        }
+        {
+            let mut metrics = self.metrics.lock().unwrap();
+            if let Some(metrics) = &mut *metrics {
+                metrics.clear();
+            }
         }
     }
 
@@ -511,9 +542,10 @@ where
     /// assert!(cache.metrics().is_some());
     /// ```
     ///
-    pub fn metrics(&self) -> Option<&Metrics> {
-        if let Some(metrics) = &self.metrics {
-            Some(metrics)
+    pub fn metrics(&self) -> Option<Metrics> {
+        let metrics = self.metrics.lock().unwrap();
+        if let Some(metrics) = &*metrics {
+            Some(metrics.clone())
         } else {
             None
         }
@@ -533,8 +565,8 @@ mod tests {
         assert!(cache.insert(1, 1).is_ok());
         assert!(cache.insert(2, 2).is_ok());
         assert!(cache.insert(2, 2).is_ok());
-        assert_eq!(cache.admit.estimate(&cache.key_hash(&1)), 1);
-        assert_eq!(cache.admit.estimate(&cache.key_hash(&2)), 2);
+        assert_eq!(cache.admit.lock().unwrap().estimate(&cache.key_hash(&1)), 1);
+        assert_eq!(cache.admit.lock().unwrap().estimate(&cache.key_hash(&2)), 2);
     }
 
     #[test]
@@ -600,7 +632,7 @@ mod tests {
             if let Some(preview) = preview {
                 assert_eq!(preview, 1);
             }
-            assert_eq!(cache.admit.estimate(&cache.key_hash(&1)), 2);
+            assert_eq!(cache.admit.lock().unwrap().estimate(&cache.key_hash(&1)), 2);
         } else {
             assert!(false, "Item should be in cache");
         }
@@ -621,8 +653,10 @@ mod tests {
         let mut cache = Cache::with_on_evict(1000, 2, TestEvict::default()).with_metrics();
         assert!(cache.insert(1, 2).is_ok());
         assert!(cache.insert(2, 2).is_ok());
-        cache.admit.increment(&cache.key_hash(&2));
-        cache.admit.increment(&cache.key_hash(&3));
+        let k = cache.key_hash(&2);
+        cache.admit.get_mut().unwrap().increment(&k);
+        let k = cache.key_hash(&3);
+        cache.admit.get_mut().unwrap().increment(&k);
         assert!(cache.insert(3, 3).is_ok());
         assert!(cache.contains(&2));
         assert!(cache.contains(&3));
@@ -634,7 +668,8 @@ mod tests {
         let mut cache = Cache::new(1000, 2).with_metrics();
         assert!(cache.insert(1, 1).is_ok());
         assert!(cache.insert(2, 2).is_ok());
-        cache.admit.increment(&cache.key_hash(&1));
+        let k = cache.key_hash(&1);
+        cache.admit.get_mut().unwrap().increment(&k);
         if let Err(_) = cache.insert(4, 4) {
             assert!(cache.contains(&1));
             assert!(!cache.contains(&2), "Victim should be value 2");
