@@ -211,7 +211,7 @@ where
     }
 
     ///
-    /// Remove selected victim forom storage.
+    /// Remove selected victim from storage.
     ///
     fn remove_victim(&mut self, victim: Option<SampleItem>) {
         if let Some(victim) = victim {
