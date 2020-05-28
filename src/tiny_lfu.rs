@@ -46,7 +46,8 @@ pub struct TinyLFUCache {
     filter: CuckooFilter<u64>,
     increments: usize,
     window_size: usize,
-    window: HashSet<u64>,
+    actual_window: HashSet<u64>,
+    previous_window: HashSet<u64>,
 }
 
 impl TinyLFUCache {
@@ -69,15 +70,23 @@ impl TinyLFUCache {
             filter: CuckooFilter::from_entries_per_index(window_size, 0.01, 8),
             window_size,
             increments: 0,
-            window: HashSet::new(),
+            actual_window: HashSet::new(),
+            previous_window: HashSet::new(),
         }
     }
 
     fn reset_sketcher(&mut self) {
-        for item in self.window.drain() {
+        for item in self.previous_window.drain() {
             let hits = self.sketcher.count(&item);
-            self.sketcher.insert(&item, -((hits / 2) + (hits % 2)))
+            self.sketcher.insert(&item, -hits);
         }
+        let mut tmp = HashSet::new();
+        for item in self.actual_window.drain() {
+            let hits = self.sketcher.count(&item);
+            self.sketcher.insert(&item, -((hits / 2) + (hits % 2)));
+            tmp.insert(item);
+        }
+        self.previous_window = tmp;
     }
 }
 
@@ -91,16 +100,17 @@ impl TinyLFU for TinyLFUCache {
     }
 
     fn increment(&mut self, k: &u64) {
+        if self.increments >= self.window_size {
+            self.reset()
+        }
         if !self.filter.contains(k) {
             self.filter.insert(k);
         } else {
             self.sketcher.insert(k, 1);
-            self.window.insert(k.clone());
+            self.previous_window.remove(k);
+            self.actual_window.insert(k.clone());
         }
         self.increments += 1;
-        if self.increments >= self.window_size {
-            self.reset()
-        }
     }
 
     fn reset(&mut self) {
@@ -126,11 +136,18 @@ mod tests {
         tiny.increment(&1);
         tiny.increment(&1);
         tiny.increment(&1);
-        assert!(tiny.filter.contains(&1));
-        assert_eq!(tiny.sketcher.count(&1), 2);
         tiny.increment(&1);
-        assert!(!tiny.filter.contains(&1));
+        assert!(tiny.filter.contains(&1));
+        assert_eq!(tiny.sketcher.count(&1), 3);
+        tiny.increment(&1);
+        assert!(tiny.filter.contains(&1));
         assert_eq!(tiny.sketcher.count(&1), 1);
+        tiny.increment(&2);
+        tiny.increment(&2);
+        tiny.increment(&2);
+        tiny.increment(&2);
+        assert!(!tiny.filter.contains(&1));
+        assert_eq!(tiny.sketcher.count(&1), 0);
     }
 
     #[test]
