@@ -1,7 +1,7 @@
 use crate::cache::OnEvict;
 use crate::tiny_lfu::TinyLFU;
 use crate::ttl::{Expiration, ExpirationMap};
-use indexmap::map::IndexMap;
+use indexmap::map::{IndexMap, Keys};
 use log::warn;
 use rand::distributions::Uniform;
 use rand::{thread_rng, Rng};
@@ -158,6 +158,11 @@ pub trait Store<K, V>: Iterator {
     fn contains(&self, k: &u64) -> bool;
 
     ///
+    /// Return an iterator over the keys of the map, in their order
+    ///
+    fn keys(&self) -> Keys<u64, Item<K, V>>;
+
+    ///
     /// Return item ref if is in storage
     ///
     /// # Arguments
@@ -282,6 +287,10 @@ impl<K, V> Store<K, V> for Storage<K, V> {
 
     fn contains(&self, k: &u64) -> bool {
         self.get(k).is_some()
+    }
+
+    fn keys(&self) -> Keys<u64, Item<K, V>> {
+        self.data.keys()
     }
 
     fn get(&self, k: &u64) -> Option<&Item<K, V>> {
@@ -543,6 +552,15 @@ mod tests {
             assert_eq!(item.v, 2);
         }
         assert!(store.remove(&1).is_none());
+    }
+
+    #[test]
+    fn keys() {
+        let mut store = Storage::with_capacity(10);
+        assert!(store.insert(1, Item::new(1, 2)).is_none());
+        assert!(store.insert(2, Item::new(2, 1)).is_none());
+        let keys = store.keys().collect::<Vec<&u64>>();
+        assert_eq!(keys, vec![&1, &2]);
     }
 
     #[test]
