@@ -1,6 +1,6 @@
 use crate::metrics::{MetricType, Metrics};
 use crate::store::{Item, SampleItem, Storage, Store};
-use crate::tiny_lfu::{TinyLFU, TinyLFUCache};
+use crate::tiny_lfu::{TinyLFU, TinyLFUCache, MAX_WINDOW_SIZE};
 use probabilistic_collections::SipHasherBuilder;
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::marker::PhantomData;
@@ -48,19 +48,52 @@ pub struct Cache<
 
 impl<K: Eq + Hash, V> Cache<K, V> {
     ///
-    /// Create new cache.
+    /// Create new cache with default `window_size` = 10000 for TinyLFU.
     ///
     /// # Arguments
     ///
-    /// - `window_size`: window size for TinyLFU (max. 10000)
     ///- `capacity`: max items in cache
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use cascara::Cache;
+    ///
+    /// let cache = Cache::<u8,u8>::new(100);
+    /// ```
+    ///
+    /// # Panic
+    ///
+    /// If `capacity` is 0.
+    ///
+    pub fn new(capacity: usize) -> Self {
+        Self::with_window_size(capacity, MAX_WINDOW_SIZE)
+    }
+
+    ///
+    /// Create new cache with defined window size fo TinyLFU.
+    ///
+    /// # Arguments
+    ///
+    /// - `window_size`: window size for TinyLFU (max. 10 000)
+    ///- `capacity`: max items in cache
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use cascara::Cache;
+    ///
+    /// let cache = Cache::<u8,u8>::with_window_size(100,20);
+    /// ```
     ///
     /// # Panic
     ///
     /// If `window_size` or `capacity` is 0.
+    /// If `window_size` > 10 000
     ///
-    pub fn new(window_size: usize, capacity: usize) -> Self {
+    pub fn with_window_size(capacity: usize, window_size: usize) -> Self {
         assert_ne!(window_size, 0);
+        assert!(window_size <= 10_000);
         assert_ne!(capacity, 0);
         Self {
             _k: PhantomData::default(),
@@ -80,20 +113,72 @@ where
     E: OnEvict<K, V>,
 {
     ///
-    /// Create new cache.
+    /// Create new cache with TinyLFU window size = 10 000 and callback for evicted items from cache.
     ///
     /// # Arguments
     ///
-    /// - `window_size`: window size for TinyLFU (max. 10000)
     /// - `capacity`: max items in cache
     /// - `on_evict`: will be call for every item evicted from cache.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use cascara::{Cache, OnEvict};
+    ///
+    /// #[derive(Default)]
+    /// struct Evict {}
+    ///
+    /// impl OnEvict<u8, u8> for Evict {
+    ///     fn evict(&self, k: &u8, v: &u8) {
+    ///         println!("Evict item.  k={}, v={}", k, v);
+    ///     }
+    /// }
+    ///
+    /// let cache = Cache::<u8,u8,Evict>::with_on_evict(100, Evict::default());
+    /// ```
+    ///
+    /// # Panic
+    ///
+    /// If  `capacity` is 0.
+    ///
+    pub fn with_on_evict(capacity: usize, on_evict: E) -> Self {
+        Self::with_on_evict_and_window_size(capacity, on_evict, MAX_WINDOW_SIZE)
+    }
+
+    ///
+    /// Create new cache with defined window size for TinyLFU and callback for evicted items from cache.
+    ///
+    /// # Arguments
+    ///
+    /// - `capacity`: max items in cache
+    /// - `on_evict`: will be call for every item evicted from cache.
+    /// - `window_size`: window size for TinyLFU (max. 10 000)
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use cascara::{Cache, OnEvict};
+    ///
+    /// #[derive(Default)]
+    /// struct Evict {}
+    ///
+    /// impl OnEvict<u8, u8> for Evict {
+    ///     fn evict(&self, k: &u8, v: &u8) {
+    ///         println!("Evict item.  k={}, v={}", k, v);
+    ///     }
+    /// }
+    ///
+    /// let cache = Cache::<u8,u8,Evict>::with_on_evict_and_window_size(100, Evict::default(), 20);
+    /// ```
     ///
     /// # Panic
     ///
     /// If `window_size` or `capacity` is 0.
+    /// If `window_size` > 10 000
     ///
-    pub fn with_on_evict(window_size: usize, capacity: usize, on_evict: E) -> Self {
+    pub fn with_on_evict_and_window_size(capacity: usize, on_evict: E, window_size: usize) -> Self {
         assert_ne!(window_size, 0);
+        assert!(window_size <= 10_000);
         assert_ne!(capacity, 0);
         Self {
             _k: PhantomData::default(),
@@ -115,12 +200,18 @@ where
     A: TinyLFU,
     H: BuildHasher,
 {
+    ///
+    /// Calculate hash for given item key
+    ///
     fn key_hash(&self, k: &K) -> u64 {
         let mut hasher = self.hasher_builder.build_hasher();
         k.hash(&mut hasher);
         hasher.finish()
     }
 
+    ///
+    /// Remove selected victim forom storage.
+    ///
     fn remove_victim(&mut self, victim: Option<SampleItem>) {
         if let Some(victim) = victim {
             if let Some(removed) = self.store.remove(&victim.key) {
@@ -136,6 +227,9 @@ where
         }
     }
 
+    ///
+    /// Insert item into storage
+    ///
     fn insert_item_with_ttl(
         &mut self,
         k: u64,
@@ -198,7 +292,7 @@ where
     /// ```
     /// use cascara::Cache;
     ///
-    /// let cache = Cache::<u8,u8>::new(10,100).with_metrics();
+    /// let cache = Cache::<u8,u8>::new(100).with_metrics();
     /// assert!(cache.metrics().is_some());
     /// ```
     ///
@@ -218,7 +312,7 @@ where
     /// ```
     /// use cascara::Cache;
     ///
-    /// let cache = Cache::<u8,u8>::new(10,100);
+    /// let cache = Cache::<u8,u8>::new(100);
     /// assert_eq!(cache.capacity(), 100);
     /// ```
     ///
@@ -234,7 +328,7 @@ where
     /// ```
     /// use cascara::Cache;
     ///
-    /// let mut cache = Cache::new(10,100);
+    /// let mut cache = Cache::new(100);
     /// assert!(cache.insert(1,1).is_ok());
     /// assert_eq!(cache.len(), 1);
     /// ```
@@ -251,7 +345,7 @@ where
     /// ```
     /// use cascara::Cache;
     ///
-    /// let cache = Cache::<u8,u8>::new(10,100);
+    /// let cache = Cache::<u8,u8>::new(100);
     /// assert!(cache.is_empty());
     /// ```
     ///
@@ -267,7 +361,7 @@ where
     /// ```
     /// use cascara::Cache;
     ///
-    /// let mut cache = Cache::new(10,100);
+    /// let mut cache = Cache::new(100);
     /// assert_eq!(cache.room_left(), 100);
     /// assert!(cache.insert(1,1).is_ok());
     /// assert_eq!(cache.room_left(), 99);
@@ -289,7 +383,7 @@ where
     /// ```
     /// use cascara::Cache;
     ///
-    /// let mut cache = Cache::new(10,100);
+    /// let mut cache = Cache::new(100);
     /// assert!(!cache.contains(&1));
     /// assert!(cache.insert(1,1).is_ok());
     /// assert!(cache.contains(&1));
@@ -312,7 +406,7 @@ where
     /// ```
     /// use cascara::Cache;
     ///
-    /// let mut cache = Cache::new(10,100);
+    /// let mut cache = Cache::new(100);
     /// assert!(cache.insert(1,2).is_ok());
     /// assert_eq!(cache.get(&1), Some(&2));
     /// ```
@@ -354,7 +448,7 @@ where
     /// ```
     /// use cascara::Cache;
     ///
-    /// let mut cache = Cache::new(10,100);
+    /// let mut cache = Cache::new(100);
     /// assert!(cache.insert(1,1).is_ok());
     /// let v = cache.get_mut(&1);
     /// assert!(v.is_some());
@@ -404,7 +498,7 @@ where
     /// ```
     /// use cascara::Cache;
     ///
-    /// let mut cache = Cache::new(10,100);
+    /// let mut cache = Cache::new(100);
     /// assert!(cache.insert(1,1).is_ok());
     /// let v = cache.insert(1,2);
     /// assert!(v.is_ok());
@@ -436,7 +530,7 @@ where
     /// use cascara::Cache;
     /// use std::time::Duration;
     ///
-    /// let mut cache = Cache::new(10,100);
+    /// let mut cache = Cache::new(100);
     /// assert!(cache.insert_with_ttl(1,1, Duration::from_secs(1)).is_ok());
     /// assert!(cache.contains(&1));
     /// std::thread::sleep(Duration::from_secs(2));
@@ -483,7 +577,7 @@ where
     /// ```
     /// use cascara::Cache;
     ///
-    /// let mut cache = Cache::new(10,100);
+    /// let mut cache = Cache::new(100);
     /// assert!(cache.insert(1,2).is_ok());
     /// assert!(cache.contains(&1));
     /// assert_eq!(cache.remove(&1), Some(2));
@@ -506,7 +600,7 @@ where
     /// ```
     /// use cascara::Cache;
     ///
-    /// let mut cache = Cache::new(10,100);
+    /// let mut cache = Cache::new(100);
     /// assert!(cache.insert(1,1).is_ok());
     /// assert!(cache.insert(2,2).is_ok());
     /// assert!(cache.contains(&1));
@@ -538,7 +632,7 @@ where
     /// ```
     /// use cascara::Cache;
     ///
-    /// let cache = Cache::<u8,u8>::new(10,100).with_metrics();
+    /// let cache = Cache::<u8,u8>::new(100).with_metrics();
     /// assert!(cache.metrics().is_some());
     /// ```
     ///
@@ -561,7 +655,7 @@ mod tests {
 
     #[test]
     fn estimate() {
-        let mut cache = Cache::new(100, 10).with_metrics();
+        let mut cache = Cache::new(10).with_metrics();
         assert!(cache.insert(1, 1).is_ok());
         assert!(cache.insert(2, 2).is_ok());
         assert!(cache.insert(2, 2).is_ok());
@@ -571,7 +665,7 @@ mod tests {
 
     #[test]
     fn insert() {
-        let mut cache = Cache::new(1000, 2).with_metrics();
+        let mut cache = Cache::new(2).with_metrics();
         if let Ok(preview) = cache.insert(1, 1) {
             assert!(preview.is_none());
         } else {
@@ -582,7 +676,7 @@ mod tests {
 
     #[test]
     fn insert_with_ttl() {
-        let mut cache = Cache::new(1000, 2).with_metrics();
+        let mut cache = Cache::new(2).with_metrics();
         if let Ok(preview) = cache.insert_with_ttl(1, 1, Duration::from_secs(1)) {
             assert!(preview.is_none());
         } else {
@@ -593,7 +687,7 @@ mod tests {
 
     #[test]
     fn cleanup_before_insert() {
-        let mut cache = Cache::new(1000, 2).with_metrics();
+        let mut cache = Cache::new(2).with_metrics();
         assert!(cache.insert_with_ttl(1, 1, Duration::from_secs(1)).is_ok());
         assert!(cache.contains(&1));
         std::thread::sleep(Duration::from_secs(2));
@@ -614,7 +708,7 @@ mod tests {
 
     #[test]
     fn cleanup_with_evict() {
-        let mut cache = Cache::with_on_evict(1000, 2, TestEvict::default()).with_metrics();
+        let mut cache = Cache::with_on_evict(2, TestEvict::default()).with_metrics();
         assert!(cache.insert_with_ttl(1, 2, Duration::from_secs(1)).is_ok());
         assert!(cache.contains(&1));
         std::thread::sleep(Duration::from_secs(2));
@@ -625,7 +719,7 @@ mod tests {
 
     #[test]
     fn update() {
-        let mut cache = Cache::new(1000, 2).with_metrics();
+        let mut cache = Cache::new(2).with_metrics();
         assert!(cache.insert(1, 1).is_ok());
         if let Ok(preview) = cache.insert(1, 2) {
             assert!(preview.is_some());
@@ -641,7 +735,7 @@ mod tests {
 
     #[test]
     fn insert_without_victim() {
-        let mut cache = Cache::new(1000, 2).with_metrics();
+        let mut cache = Cache::new(2).with_metrics();
         assert!(cache.insert(1, 1).is_ok());
         assert!(cache.insert(2, 2).is_ok());
         assert!(cache.contains(&1));
@@ -650,7 +744,7 @@ mod tests {
 
     #[test]
     fn insert_with_victim() {
-        let mut cache = Cache::with_on_evict(1000, 2, TestEvict::default()).with_metrics();
+        let mut cache = Cache::with_on_evict(2, TestEvict::default()).with_metrics();
         assert!(cache.insert(1, 2).is_ok());
         assert!(cache.insert(2, 2).is_ok());
         let k = cache.key_hash(&2);
@@ -665,7 +759,7 @@ mod tests {
 
     #[test]
     fn reject_insert() {
-        let mut cache = Cache::new(1000, 2).with_metrics();
+        let mut cache = Cache::new(2).with_metrics();
         assert!(cache.insert(1, 1).is_ok());
         assert!(cache.insert(2, 2).is_ok());
         let k = cache.key_hash(&1);
@@ -680,7 +774,7 @@ mod tests {
 
     #[test]
     fn contains() {
-        let mut cache = Cache::new(100, 10).with_metrics();
+        let mut cache = Cache::new(10).with_metrics();
         assert!(cache.insert(1, 1).is_ok());
         assert!(cache.contains(&1));
         assert!(!cache.contains(&2));
@@ -688,7 +782,7 @@ mod tests {
 
     #[test]
     fn remove() {
-        let mut cache = Cache::new(100, 10).with_metrics();
+        let mut cache = Cache::new(10).with_metrics();
         assert!(cache.insert(1, 3).is_ok());
         let removed = cache.remove(&1);
         assert!(removed.is_some());
@@ -702,20 +796,20 @@ mod tests {
 
     #[test]
     fn room_left() {
-        let mut cache = Cache::new(100, 10).with_metrics();
+        let mut cache = Cache::new(10).with_metrics();
         assert!(cache.insert(1, 1).is_ok());
         assert_eq!(cache.room_left(), 9);
     }
     #[test]
     fn capacity() {
-        let mut cache = Cache::new(100, 10).with_metrics();
+        let mut cache = Cache::new(10).with_metrics();
         assert!(cache.insert(1, 1).is_ok());
         assert_eq!(cache.capacity(), 10);
     }
 
     #[test]
     fn clear() {
-        let mut cache = Cache::new(100, 10).with_metrics();
+        let mut cache = Cache::new(10).with_metrics();
         assert!(cache.insert(1, 1).is_ok());
         assert!(cache.insert(2, 2).is_ok());
         assert!(cache.insert(3, 2).is_ok());
@@ -728,7 +822,7 @@ mod tests {
 
     #[test]
     fn is_empty() {
-        let mut cache = Cache::new(100, 10).with_metrics();
+        let mut cache = Cache::new(10).with_metrics();
         assert!(cache.is_empty());
         assert!(cache.insert(1, 1).is_ok());
         assert!(!cache.is_empty());

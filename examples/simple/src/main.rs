@@ -13,7 +13,8 @@ impl OnEvict<usize, usize> for Evict {
 }
 
 fn main() {
-    let mut cache = Cache::with_on_evict(10, 20, Evict::default()).with_metrics();
+    //create cache with activated metrics collecting(mis, hit, insert, update, evict)
+    let mut cache = Cache::with_on_evict(10, Evict::default()).with_metrics();
     assert!(cache.is_empty());
     assert_eq!(cache.get(&1), None);
     cache.insert(1, 1).expect("Item is not inserted");
