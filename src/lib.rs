@@ -1,4 +1,5 @@
 mod cache;
+mod iter;
 mod metrics;
 mod store;
 mod tiny_lfu;

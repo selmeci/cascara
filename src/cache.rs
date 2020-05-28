@@ -1,3 +1,4 @@
+use crate::iter::Iter;
 use crate::metrics::{MetricType, Metrics};
 use crate::store::{Item, SampleItem, Storage, Store};
 use crate::tiny_lfu::{TinyLFU, TinyLFUCache, MAX_WINDOW_SIZE};
@@ -38,7 +39,7 @@ pub struct Cache<
     H: BuildHasher,
 {
     hasher_builder: H,
-    store: S,
+    pub(crate) store: S,
     admit: Mutex<A>,
     on_evict: Option<E>,
     metrics: Mutex<Option<Metrics>>,
@@ -643,6 +644,27 @@ where
         } else {
             None
         }
+    }
+
+    ///
+    /// An iterator visiting all entries in order. The iterator element type is (&'a K, &'a V).
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use cascara::Cache;
+    ///
+    /// let mut cache = Cache::<u8, u8>::new(10);
+    /// assert!(cache.insert(1, 1).is_ok());
+    /// assert!(cache.insert(2, 2).is_ok());
+    /// assert!(cache.insert(3, 3).is_ok());
+    /// for (key, val) in cache.iter() {
+    ///     println!("key: {} val: {}", key, val);
+    /// }
+    /// ```
+    ///
+    pub fn iter(&self) -> Iter<K, V, S> {
+        Iter::new(&self.store)
     }
 }
 

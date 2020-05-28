@@ -39,6 +39,9 @@ fn main() {
             Err(_) => println!("Item is rejected. i: {}", i),
         }
     }
+    for (k, v) in cache.iter() {
+        println!("Item: k: {}, v: {}", k, v);
+    }
     println!(
         "\nCache metrics. {:?}",
         cache.metrics().expect("Cache should have metrics")
