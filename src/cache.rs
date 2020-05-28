@@ -189,6 +189,15 @@ where
     ///
     /// Activate metric collecting in cache
     ///
+    /// # Example
+    ///
+    /// ```
+    /// use cascara::Cache;
+    ///
+    /// let cache = Cache::<u8,u8>::new(10,100).with_metrics();
+    /// assert!(cache.metrics().is_some());
+    /// ```
+    ///
     pub fn with_metrics(mut self) -> Self {
         self.metrics = Some(Metrics::new());
         self
@@ -197,12 +206,31 @@ where
     ///
     /// Returns how many items can be hold in cache
     ///
+    /// # Example
+    ///
+    /// ```
+    /// use cascara::Cache;
+    ///
+    /// let cache = Cache::<u8,u8>::new(10,100);
+    /// assert_eq!(cache.capacity(), 100);
+    /// ```
+    ///
     pub fn capacity(&self) -> usize {
         self.store.capacity()
     }
 
     ///
     /// Returns actual number of items in cache
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use cascara::Cache;
+    ///
+    /// let mut cache = Cache::new(10,100);
+    /// assert!(cache.insert(1,1).is_ok());
+    /// assert_eq!(cache.len(), 1);
+    /// ```
     ///
     pub fn len(&self) -> usize {
         self.store.len()
@@ -211,12 +239,32 @@ where
     ///
     /// Returns true if cache is empty
     ///
+    /// # Example
+    ///
+    /// ```
+    /// use cascara::Cache;
+    ///
+    /// let cache = Cache::<u8,u8>::new(10,100);
+    /// assert!(cache.is_empty());
+    /// ```
+    ///
     pub fn is_empty(&self) -> bool {
         self.store.is_empty()
     }
 
     ///
     /// Returns how many room left
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use cascara::Cache;
+    ///
+    /// let mut cache = Cache::new(10,100);
+    /// assert_eq!(cache.room_left(), 100);
+    /// assert!(cache.insert(1,1).is_ok());
+    /// assert_eq!(cache.room_left(), 99);
+    /// ```
     ///
     pub fn room_left(&self) -> usize {
         self.store.room_left()
@@ -229,6 +277,17 @@ where
     ///
     /// - `k`: item key
     ///
+    /// # Example
+    ///
+    /// ```
+    /// use cascara::Cache;
+    ///
+    /// let mut cache = Cache::new(10,100);
+    /// assert!(!cache.contains(&1));
+    /// assert!(cache.insert(1,1).is_ok());
+    /// assert!(cache.contains(&1));
+    /// ```
+    ///
     pub fn contains(&self, k: &K) -> bool {
         let k = self.key_hash(k);
         self.store.contains(&k)
@@ -240,6 +299,16 @@ where
     /// # Arguments
     ///
     /// - `k`: item key
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use cascara::Cache;
+    ///
+    /// let mut cache = Cache::new(10,100);
+    /// assert!(cache.insert(1,2).is_ok());
+    /// assert_eq!(cache.get(&1), Some(&2));
+    /// ```
     ///
     pub fn get(&mut self, k: &K) -> Option<&V> {
         let k = self.key_hash(k);
@@ -266,6 +335,21 @@ where
     /// # Arguments
     ///
     /// - `k`: item key
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use cascara::Cache;
+    ///
+    /// let mut cache = Cache::new(10,100);
+    /// assert!(cache.insert(1,1).is_ok());
+    /// let v = cache.get_mut(&1);
+    /// assert!(v.is_some());
+    /// if let Some(v) = v {
+    ///     *v = 2;
+    /// }
+    /// assert_eq!(cache.get(&1), Some(&2));
+    /// ```
     ///
     pub fn get_mut(&mut self, k: &K) -> Option<&mut V> {
         let k = self.key_hash(k);
@@ -296,6 +380,20 @@ where
     /// - `k`: item key
     /// - `v`: item value
     ///
+    /// # Example
+    ///
+    /// ```
+    /// use cascara::Cache;
+    ///
+    /// let mut cache = Cache::new(10,100);
+    /// assert!(cache.insert(1,1).is_ok());
+    /// let v = cache.insert(1,2);
+    /// assert!(v.is_ok());
+    /// if let Ok(v) = v {
+    ///      assert_eq!(v, Some(1));
+    /// }
+    /// ```
+    ///
     pub fn insert(&mut self, k: K, v: V) -> Result<Option<V>, ()> {
         self.insert_with_ttl(k, v, Duration::from_secs(0))
     }
@@ -312,6 +410,19 @@ where
     /// - `k`: item key
     /// - `v`: item value
     /// - `expiration`: how many seconds should item lives
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use cascara::Cache;
+    /// use std::time::Duration;
+    ///
+    /// let mut cache = Cache::new(10,100);
+    /// assert!(cache.insert_with_ttl(1,1, Duration::from_secs(1)).is_ok());
+    /// assert!(cache.contains(&1));
+    /// std::thread::sleep(Duration::from_secs(2));
+    /// assert!(!cache.contains(&1));
+    /// ```
     ///
     pub fn insert_with_ttl(&mut self, k: K, v: V, expiration: Duration) -> Result<Option<V>, ()> {
         self.store.cleanup(&self.on_evict);
@@ -342,6 +453,17 @@ where
     ///
     /// - `k`: item key
     ///
+    /// # Example
+    ///
+    /// ```
+    /// use cascara::Cache;
+    ///
+    /// let mut cache = Cache::new(10,100);
+    /// assert!(cache.insert(1,2).is_ok());
+    /// assert!(cache.contains(&1));
+    /// assert_eq!(cache.remove(&1), Some(2));
+    /// assert!(!cache.contains(&1));
+    /// ```
     pub fn remove(&mut self, k: &K) -> Option<V> {
         let k = self.key_hash(k);
         if let Some(item) = self.store.remove(&k) {
@@ -354,6 +476,21 @@ where
     ///
     /// Remove all items from cache.
     ///
+    /// # Example
+    ///
+    /// ```
+    /// use cascara::Cache;
+    ///
+    /// let mut cache = Cache::new(10,100);
+    /// assert!(cache.insert(1,1).is_ok());
+    /// assert!(cache.insert(2,2).is_ok());
+    /// assert!(cache.contains(&1));
+    /// assert!(cache.contains(&2));
+    /// cache.clear();
+    /// assert!(!cache.contains(&1));
+    /// assert!(!cache.contains(&2));
+    /// ```
+    ///
     pub fn clear(&mut self) {
         self.store.clear();
         self.admit.clear();
@@ -364,6 +501,15 @@ where
 
     ///
     /// Return cache metrics
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use cascara::Cache;
+    ///
+    /// let cache = Cache::<u8,u8>::new(10,100).with_metrics();
+    /// assert!(cache.metrics().is_some());
+    /// ```
     ///
     pub fn metrics(&self) -> Option<&Metrics> {
         if let Some(metrics) = &self.metrics {
