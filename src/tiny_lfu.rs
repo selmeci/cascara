@@ -6,7 +6,7 @@ use std::collections::HashSet;
 ///
 /// Max window size before sketcher is reset
 ///
-const MAX_WINDOW_SIZE: usize = 10000;
+pub const MAX_WINDOW_SIZE: usize = 10000;
 
 pub trait TinyLFU {
     ///
