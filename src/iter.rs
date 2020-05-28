@@ -1,5 +1,6 @@
 use crate::store::{Item, Store};
 use indexmap::map::Keys;
+use std::iter::FusedIterator;
 
 pub struct Iter<'a, K, V, S>
 where
@@ -37,6 +38,8 @@ where
         }
     }
 }
+
+impl<'a, K, V, S> FusedIterator for Iter<'a, K, V, S> where S: Store<K, V> {}
 
 #[cfg(test)]
 mod tests {
