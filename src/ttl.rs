@@ -151,7 +151,7 @@ impl Expiration for ExpirationMap {
         let mut result = HashSet::new();
         let mut buckets = Vec::new();
         for (id, _) in self.buckets.range(..now) {
-            buckets.push(id.clone())
+            buckets.push(*id)
         }
         for bucket in buckets {
             for item in self.buckets.remove(&bucket).unwrap() {

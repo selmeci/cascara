@@ -108,7 +108,7 @@ impl TinyLFU for TinyLFUCache {
         } else {
             self.sketcher.insert(k, 1);
             self.previous_window.remove(k);
-            self.actual_window.insert(k.clone());
+            self.actual_window.insert(*k);
         }
         self.increments += 1;
     }

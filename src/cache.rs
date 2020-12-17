@@ -508,7 +508,7 @@ where
     /// }
     /// ```
     ///
-    pub fn insert(&mut self, k: K, v: V) -> Result<Option<V>, ()> {
+    pub fn insert(&mut self, k: K, v: V) -> Result<Option<V>, Option<()>> {
         self.insert_with_ttl(k, v, Duration::from_secs(0))
     }
 
@@ -538,7 +538,12 @@ where
     /// assert!(!cache.contains(&1));
     /// ```
     ///
-    pub fn insert_with_ttl(&mut self, k: K, v: V, expiration: Duration) -> Result<Option<V>, ()> {
+    pub fn insert_with_ttl(
+        &mut self,
+        k: K,
+        v: V,
+        expiration: Duration,
+    ) -> Result<Option<V>, Option<()>> {
         self.store.cleanup(&self.on_evict);
 
         let key_hash = self.key_hash(&k);
@@ -561,7 +566,7 @@ where
             }
             Err(victim) => {
                 self.remove_victim(victim);
-                Err(())
+                Err(Some(()))
             }
         }
     }

@@ -104,6 +104,12 @@ impl Metrics {
     }
 }
 
+impl Default for Metrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Debug for Metrics {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("Metrics")
