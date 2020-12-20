@@ -1,29 +1,17 @@
 use std::fmt::{self, Debug, Formatter};
 
-const METRICS: usize = 6;
+const METRICS: usize = 5;
 
 ///
 /// Possible metric types
 ///
 #[derive(Debug, Clone)]
 pub enum MetricType {
-    Hit,
+    Hit = 0,
     Miss,
     KeyInsert,
     KeyUpdate,
     KeyEvict,
-}
-
-impl MetricType {
-    fn metric_idx(&self) -> usize {
-        match self {
-            MetricType::Hit => 0,
-            MetricType::Miss => 1,
-            MetricType::KeyInsert => 2,
-            MetricType::KeyUpdate => 3,
-            MetricType::KeyEvict => 4,
-        }
-    }
 }
 
 ///
@@ -49,7 +37,7 @@ impl Metrics {
     ///
     pub fn insert(&mut self, metric: MetricType, k: &u64, delta: usize) {
         let idx = (k % 25) * 10;
-        let vals = &mut self.all[metric.metric_idx()];
+        let vals = &mut self.all[metric as usize];
         vals[idx as usize] += delta;
     }
 
@@ -57,7 +45,7 @@ impl Metrics {
     /// Get collected data about metric type
     ///
     pub fn get(&self, metric: MetricType) -> usize {
-        let vals = &self.all[metric.metric_idx()];
+        let vals = &self.all[metric as usize];
         vals.iter().sum()
     }
 
@@ -113,6 +101,12 @@ impl Metrics {
     ///
     pub fn clear(&mut self) {
         self.all = [[0; 256]; METRICS];
+    }
+}
+
+impl Default for Metrics {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
