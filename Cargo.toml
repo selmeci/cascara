@@ -1,6 +1,6 @@
 [package]
 name = "cascara"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Selmeci <selmeci.roman@gmail.com>"]
 edition = "2018"
 description = "Implementation of TinyLFU cache"
@@ -13,7 +13,7 @@ homepage = "https://github.com/selmeci/cascara"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-indexmap = "1.6"
+indexmap = "1.9"
 log = "0.4"
-rand = "0.7"
+rand = "0.8"
 probabilistic-collections = "0.7"
